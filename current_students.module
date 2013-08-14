@@ -34,9 +34,37 @@ function current_students_block_info() {
  * 1. First checks for the account information and attempts to match the account information with current_student data
  * 2. If the student data exists and hasn't recently been imported into yc_patron, then import/update the information
  * 3. If the student data exists, then set the student role
+ * 4. Log the account creation or update via Watchdog
+ * 5. If account already exists, then do nothing.
  * 
  */
 function current_students_user_login(&$edit, $account) {
 	global $user;
+	$userID = '';
+	$ONID = '';
+	$count = 0;
+	$userID = $user->uid;
+	drupal_set_message(t('Your user ID is: ' .$userID .'.'), 'status');
 	//
+	//my first query using the Drupal database API
+	$result = db_select('cas_user', 'cas')
+		->addTag('node_access')
+		->fields('cas', array('cas_name'))
+		->condition('cas.uid', $userID)
+		->execute();
+	foreach ($result as $row) {
+		$ONID = $row->cas_name;
+	}
+	if (($ONID == '') || (strlen($ONID) == 0)) { //Not an OSU user. Likely an account created by an administrator
+		// do nothing
+		return;
+	} else {
+		// is this a new or a returning user?
+		// check yc_patron for the answer
+		$result = db_query('Select count (*) as count from {patron} p Where p.ONID = :ONID',
+			array(':ONID' => $ONID));
+		foreach ($result as $row) {
+			$count = $row->count;
+		}
+	}
 }
