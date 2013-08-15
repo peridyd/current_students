@@ -1,4 +1,4 @@
-<?php 
+<?php
 /**
  * Implements hook_help
  * 
@@ -10,33 +10,33 @@
  */
 function current_students_help($path, $arg) {
 	switch ($path) {
-		case "admin/help#current_students":
-			return '<p>' . t("Imports institutional student data into the Writing Center modules.") . '</p>';
+		case "admin/help#current_students" :
+			return '<p>' . t ( "Imports institutional student data into the Writing Center modules." ) . '</p>';
 			break;
 	}
 }
 
 /**
- * Implements hook_clock_info()
+ * Implements hook_block_info()
  */
 function current_students_block_info() {
-	$blocks['current_students'] = array(
-		//The name that will appear in the block list.
-		'info' => t('Current Students active'),
-		// default setting
-		'cache'=> DRUPAL_CACHE_PER_ROLE,
+	$blocks ['current_students'] = array (
+			// The name that will appear in the block list.
+			'info' => t ( 'Current Students active' ),
+			// default setting
+			'cache' => DRUPAL_CACHE_PER_ROLE 
 	);
 	return $blocks;
 }
 
 /**
  * Implements hook_user_login
- * 1. First checks for the account information and attempts to match the account information with current_student data
+ * 1.
+ * First checks for the account information and attempts to match the account information with current_student data
  * 2. If the student data exists and hasn't recently been imported into yc_patron, then import/update the information
  * 3. If the student data exists, then set the student role
  * 4. Log the account creation or update via Watchdog
  * 5. If account already exists, then do nothing.
- * 
  */
 function current_students_user_login(&$edit, $account) {
 	global $user;
@@ -44,27 +44,92 @@ function current_students_user_login(&$edit, $account) {
 	$ONID = '';
 	$count = 0;
 	$userID = $user->uid;
-	drupal_set_message(t('Your user ID is: ' .$userID .'.'), 'status');
-	//
-	//my first query using the Drupal database API
-	$result = db_select('cas_user', 'cas')
-		->addTag('node_access')
-		->fields('cas', array('cas_name'))
-		->condition('cas.uid', $userID)
-		->execute();
-	foreach ($result as $row) {
+	$student = FALSE;
+	drupal_set_message (t( 'Your user ID is: ' . $userID . '.' ), 'status');
+	// my first query using the Drupal database API
+	$result = db_select ( 'cas_user', 'cas' )->addTag ( 'node_access' )->fields ( 'cas', array (
+			'cas_name' 
+	) )->condition ( 'cas.uid', $userID )->execute ();
+	foreach ( $result as $row ) {
 		$ONID = $row->cas_name;
 	}
-	if (($ONID == '') || (strlen($ONID) == 0)) { //Not an OSU user. Likely an account created by an administrator
-		// do nothing
+	if (($ONID == '') || (strlen ( $ONID ) == 0)) { // Not an OSU user. Likely an account created by an administrator
+	                                             // do nothing
 		return;
 	} else {
 		// is this a new or a returning user?
 		// check yc_patron for the answer
-		$result = db_query('Select count (*) as count from {patron} p Where p.ONID = :ONID',
-			array(':ONID' => $ONID));
-		foreach ($result as $row) {
+		$result = db_query ( 'Select count (*) as count from {patron} p Where p.ONID = :ONID', array (
+				':ONID' => $ONID 
+		) );
+		foreach ( $result as $row ) {
 			$count = $row->count;
+		} 
+		if ($count == 0) {
+			// has never used the Writing Center before
+			$newbie = TRUE;
+		} else {
+			$newbie = FALSE;
+		}
+		/**
+		 * Need to look for data in the current students table. This dataset will be used below regardless of 
+		 * whether or not we need to register/update the student record
+		 */
+		$query = db_select ( 'currentstudents', 'cs' );
+			$query->addField('cs', '`First Name`', 'FirstName');
+		
+			$query->addField('cs', 'Last Name', 'LastName');
+			$query->addField('cs', 'ONID ID', 'ONID');
+			$query->addField('cs', 'Directory Student E-mail', 'EmailAddress');
+			$data = $query
+				->fields('cs', array('Student ID', 'Gender', 'Term', 'Class Standing', 
+					'Class Standing Desc', 'Intl English Program Flag', 'Primary Major 1',
+					'Stu Level Code', 'Stu Level Code Desc'))
+				->addTag('node_accesss')
+				->condition('cs.ONID', $ONID);		
+			$data->execute();
+		$dataLength = $data->rowCount();
+		if ($dataLength == 1) {
+			// we have a student
+			$student = TRUE;
+		}
+		if (($count == 0) && ($newbie)) {
+			// new student who needs to be registered
+			// perform an insert
+			if ($dataLength == 1) {
+				$insertID = db_insert ( 'patron' )->fields ( $data )->execute ();
+				drupal_set_message ( 'New student; insert processed. Database id: ' . $insertID, 'status' );
+				return;
+			}
+		} elseif (($count == 0) && $newbie == FALSE) {
+			// not a student, return;
+			drupal_set_message ( 'Not a student. Done here.', 'status' );
+			return;
+		} elseif (($count == 1) && ($newbie == FALSE)) {
+			/**
+			 * 1.
+			 * already has a student account. Check to see if it needs updating
+			 * 2. if not, return with no watchdog log
+			 * 3. if the record needs updating, then do so and log it in watchdog
+			 * 4. return
+			 */
+			$termLastUpdate = db_query ( 'Select term from {patron} p Where p.ONID = :ONID', array (
+					':ONID' => $ONID 
+			) );
+			$termCurrentStudents = db_query ( 'Select Term from {currentstudents} where 1 limit 1' );
+			foreach ( $termLastUpdate as $row ) {
+				$term = $row->term;
+			}
+			foreach ( $termCurrentStudents as $row ) {
+				$dataTerm = $row->Term;
+			}
+			if ($dataTerm != $term) {
+				// update
+				drupal_set_message ( 'update needed: ' . $dataTerm . ' <> ' . $term . '.', 'status' );
+			} else {
+				// no update needed
+				drupal_set_message ( 'existing user. No update necessary.', 'status' );
+			}
 		}
 	}
 }
