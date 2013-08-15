@@ -1,4 +1,12 @@
 <?php
 function current_students_update_7001() {
-
+	/**
+	db_change_field('currentstudents', 'First Name', 'firstname',
+	array('description' => t('First name of the student.'),
+			'type' => 'varchar', 'length' => 150, 'default' => '',));
+	db_change_field('currentstudents', 'Last Name', 'lastname', 
+		array('description' => t('Last or family name of the student.'), 
+		'type' => 'varchar', 'length' => 150, 'default' => '',));
+	**/
+	
 }

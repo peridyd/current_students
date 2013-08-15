@@ -45,7 +45,8 @@ function current_students_user_login(&$edit, $account) {
 	$count = 0;
 	$userID = $user->uid;
 	$student = FALSE;
-	drupal_set_message (t( 'Your user ID is: ' . $userID . '.' ), 'status');
+	$message = 'default';
+	
 	// my first query using the Drupal database API
 	$result = db_select ( 'cas_user', 'cas' )->addTag ( 'node_access' )->fields ( 'cas', array (
 			'cas_name' 
@@ -59,11 +60,12 @@ function current_students_user_login(&$edit, $account) {
 	} else {
 		// is this a new or a returning user?
 		// check yc_patron for the answer
-		$result = db_query ( 'Select count (*) as count from {patron} p Where p.ONID = :ONID', array (
+		$result = db_query ( 'Select count(*) as count from {patron} p Where p.ONID = :ONID', array (
 				':ONID' => $ONID 
 		) );
 		foreach ( $result as $row ) {
 			$count = $row->count;
+			//drupal_set_message($count);
 		} 
 		if ($count == 0) {
 			// has never used the Writing Center before
@@ -76,19 +78,31 @@ function current_students_user_login(&$edit, $account) {
 		 * whether or not we need to register/update the student record
 		 */
 		$query = db_select ( 'currentstudents', 'cs' );
-			$query->addField('cs', '`First Name`', 'FirstName');
-		
-			$query->addField('cs', 'Last Name', 'LastName');
-			$query->addField('cs', 'ONID ID', 'ONID');
-			$query->addField('cs', 'Directory Student E-mail', 'EmailAddress');
+			$query->addField('cs', 'ONIDID', 'ONID');
+			$query->addField('cs', 'DirectoryStudentE-mail', 'EmailAddress');
 			$data = $query
-				->fields('cs', array('Student ID', 'Gender', 'Term', 'Class Standing', 
-					'Class Standing Desc', 'Intl English Program Flag', 'Primary Major 1',
-					'Stu Level Code', 'Stu Level Code Desc'))
-				->addTag('node_accesss')
-				->condition('cs.ONID', $ONID);		
-			$data->execute();
-		$dataLength = $data->rowCount();
+				->fields('cs', array('FirstName', 'LastName', 'StudentID', 'Gender', 'Term', 'ClassStanding', 
+					'ClassStandingDesc', 'IntlEnglishProgramFlag', 'PrimaryMajor1',
+					'StuLevelCode', 'StuLevelCodeDesc'))
+				->addTag('node_access')
+				->condition('cs.ONIDID', $ONID)		
+				->execute();
+		$dataLength = 0;
+		foreach ($data as $row) {
+			$dataLength ++;
+			$firstName = $row->FirstName;
+			$lastName = $row->LastName;
+			$studentID = $row->StudentID;
+			$email = $row->EmailAddress;
+			$gender = $row->Gender;
+			$term_cs = $row->Term;
+			$classStanding = $row->ClassStanding;
+			$classStandingDesc = $row->ClassStandingDesc;
+			$INTOFlag = $row->IntlEnglishProgramFlag;
+			$primaryMajor = $row->PrimaryMajor1;
+			$studentLevelCode = $row->StuLevelCode;
+			$studentLevelCodeDesc = $row->StuLevelCodeDesc;
+		}
 		if ($dataLength == 1) {
 			// we have a student
 			$student = TRUE;
@@ -97,13 +111,31 @@ function current_students_user_login(&$edit, $account) {
 			// new student who needs to be registered
 			// perform an insert
 			if ($dataLength == 1) {
-				$insertID = db_insert ( 'patron' )->fields ( $data )->execute ();
-				drupal_set_message ( 'New student; insert processed. Database id: ' . $insertID, 'status' );
-				return;
+				$insertID = db_insert ('patron')
+				->fields (array(
+						'FirstName' => $firstName,
+						'LastName' => $lastName,
+						'EmailAddress' =>$email,
+						'ONID' => $ONID,
+						'StudentID' => $studentID,
+						'Gender' => $gender,
+						'Term' => $term_cs,
+						'ClassStanding' => $classStanding,
+						'ClassStandingDesc' => $classStandingDesc,
+						'IntlEnglishProgramFlag' => $INTOFlag,
+						'PrimaryMajor1' => $primaryMajor,
+						'StuLevelCode' => $studentLevelCode,
+						'StuLevelCodeDesc' => $studentLevelCodeDesc
+				) )
+				->execute ();
+			$message = 'Student account: ' . $user->uid . ', ' . check_plain($ONID) . ', created. ID: ' . check_plain($insertID) . '.';
+			watchdog(WATCHDOG_NOTICE, $message);
+			return;
 			}
 		} elseif (($count == 0) && $newbie == FALSE) {
 			// not a student, return;
-			drupal_set_message ( 'Not a student. Done here.', 'status' );
+			$message = "Non-student account: $user->uid, $ONID, returning, logged in successfully.";
+			watchdog(WATCHDOG_NOTICE, $message);
 			return;
 		} elseif (($count == 1) && ($newbie == FALSE)) {
 			/**
@@ -116,20 +148,42 @@ function current_students_user_login(&$edit, $account) {
 			$termLastUpdate = db_query ( 'Select term from {patron} p Where p.ONID = :ONID', array (
 					':ONID' => $ONID 
 			) );
-			$termCurrentStudents = db_query ( 'Select Term from {currentstudents} where 1 limit 1' );
 			foreach ( $termLastUpdate as $row ) {
-				$term = $row->term;
+				$term_patron = $row->term;
 			}
-			foreach ( $termCurrentStudents as $row ) {
-				$dataTerm = $row->Term;
-			}
-			if ($dataTerm != $term) {
+
+			if ($term_patron != $term_cs) {
 				// update
-				drupal_set_message ( 'update needed: ' . $dataTerm . ' <> ' . $term . '.', 'status' );
+				$rowsAffected = db_update('patron')
+					->fields (array(
+						'FirstName' => $firstName,
+						'LastName' => $lastName,
+						'StudentID' => $studentID,
+						'EmailAddress' => $email,
+						'Gender' => $gender,
+						'Term' => $term_cs,
+						'ClassStanding' => $classStanding,
+						'ClassStandingDesc' => $classStandingDesc,
+						'IntlEnglishProgramFlag' => $INTOFlag,
+						'PrimaryMajor1' => $primaryMajor,
+						'StuLevelCode' => $studentLevelCode,
+						'StuLevelCodeDesc' => $studentLevelCodeDesc
+				) )
+					->condition('ONID', $ONID)
+					->execute ();
+				$message = 'Student account: ' . $user->uid . ', ' . check_plain($ONID) . ', updated. ' . check_plain($rowsAffected) . ' rows affected.';
+				watchdog(WATCHDOG_NOTICE, $message);
+				return;
 			} else {
 				// no update needed
-				drupal_set_message ( 'existing user. No update necessary.', 'status' );
+				$message ='Student account: ' . $user->uid . ', ' . check_plain($ONID) . ', logged in. No update needed.';
+				watchdog (WATCHDOG_NOTICE, $message);
+				return;
 			}
+		} else {
+			//non-student, new user
+			$message = "A new, non-student user, $user->uid, $user->name, logged in. Hmmm.";
+			watchdog(WATCHDOG_ALERT, $message);
 		}
 	}
 }
