@@ -11,7 +11,7 @@
 function current_students_help($path, $arg) {
 	switch ($path) {
 		case "admin/help#current_students" :
-			return '<p>' . t ( "Imports institutional student data into the Writing Center modules." ) . '</p>';
+			return '<p>' . t ( "Registers students into this Drupal instance so students' data are accessible to the Writing Center modules. WARNING: This is the first Drupal module that Dennis wrote. You have been warned." ) . '</p>';
 			break;
 	}
 }
@@ -40,11 +40,11 @@ function current_students_block_info() {
  */
 function current_students_user_login(&$edit, $account) {
 	global $user;
-	$userID = '';
 	$ONID = '';
 	$count = 0;
 	$userID = $user->uid;
-	$student = FALSE;
+	$student = FALSE; 	//as defined by their presence in the currentstudents table
+	$newbie = TRUE; 	//as defined by their presence in the patron table 
 	$message = 'default';
 	
 	// my first query using the Drupal database API
@@ -107,9 +107,14 @@ function current_students_user_login(&$edit, $account) {
 			// we have a student
 			$student = TRUE;
 		}
-		if (($count == 0) && ($newbie)) {
+		
+		if (($student == TRUE) && ($newbie == TRUE)) {
 			// new student who needs to be registered
 			// perform an insert
+			// insert the field data and revision data
+			
+			_insert_user_field_data($firstName, $lastName, $studentID);
+			
 			if ($dataLength == 1) {
 				$insertID = db_insert ('patron')
 				->fields (array(
@@ -132,19 +137,24 @@ function current_students_user_login(&$edit, $account) {
 			watchdog(WATCHDOG_NOTICE, $message);
 			return;
 			}
-		} elseif (($count == 0) && $newbie == FALSE) {
+		} elseif (($student == FALSE) && ($newbie == FALSE)) {
 			// not a student, return;
 			$message = "Non-student account: $user->uid, $ONID, returning, logged in successfully.";
 			watchdog(WATCHDOG_NOTICE, $message);
 			return;
-		} elseif (($count == 1) && ($newbie == FALSE)) {
+		} elseif (($student == TRUE) && ($newbie == FALSE)) {
 			/**
-			 * 1.
-			 * already has a student account. Check to see if it needs updating
-			 * 2. if not, return with no watchdog log
-			 * 3. if the record needs updating, then do so and log it in watchdog
-			 * 4. return
+			 * 1. User already has a student account. 
+			 * 2. If needed, insert the [user:field_data*] first and last names and student ID 
+			 * 		(Drupal user database is out of sync with the Writing Center database)
+			 * 3. Check to see if the data in the patron table need updating
+			 * 4. if not, return after watchdog log
+			 * 5. if the record needs updating, then do so and log it in watchdog
+			 * 6. return
 			 */
+			// insert the field data and revision data
+			_insert_user_field_data($firstName, $lastName, $studentID);
+			
 			$termLastUpdate = db_query ( 'Select term from {patron} p Where p.ONID = :ONID', array (
 					':ONID' => $ONID 
 			) );
@@ -180,10 +190,124 @@ function current_students_user_login(&$edit, $account) {
 				watchdog (WATCHDOG_NOTICE, $message);
 				return;
 			}
-		} else {
+		} elseif (($student == FALSE) && ($newbie == TRUE)) {
 			//non-student, new user
 			$message = "A new, non-student user, $user->uid, $user->name, logged in. Hmmm.";
 			watchdog(WATCHDOG_ALERT, $message);
 		}
+	}
+}
+/**
+ * 
+ * It's a pain, but we need some basic information available in 
+ * the user array.
+ * 
+ * Private function
+ * 
+ * @param string $firstName
+ * @param string $lastName
+ * @param string $studentID
+ */
+function _insert_user_field_data($firstName, $lastName, $studentID) {
+	global $user;
+	//first name
+	$result = db_query('select count(entity_id) as count from {field_data_field_first_name} f where f.entity_id = :uid',
+			array(':uid' => $user->uid));
+	foreach ($result as $record) {
+		$insert = $record->count;
+	}
+	if ($insert == 0) {
+		db_insert('field_data_field_first_name')
+		->fields (array(
+		'entity_type' => 'user',
+		'bundle' => 'user',
+		'entity_id' => $user->uid,
+		'revision_id' => $user->uid,
+		'language' => 'und',
+		'delta' => '0',
+		'field_first_name_value' => $firstName,
+		'field_first_name_format' => null,
+		))
+		->execute();
+		
+		db_insert('field_revision_field_first_name')
+		->fields (array(
+		'entity_type' => 'user',
+		'bundle' => 'user',
+		'entity_id' => $user->uid,
+		'revision_id' => $user->uid,
+		'language' => 'und',
+		'delta' => '0',
+		'field_first_name_value' => $firstName,
+		'field_first_name_format' => null,
+		))
+		->execute();
+	}
+	
+	//last name
+	$result = db_query('select count(entity_id) as count from {field_data_field_last_name} f where f.entity_id = :uid',
+			array(':uid' => $user->uid));
+	foreach ($result as $record) {
+		$insert = $record->count;
+	}
+	if ($insert == 0) {
+		db_insert('field_data_field_last_name')
+		->fields (array(
+		'entity_type' => 'user',
+		'bundle' => 'user',
+		'entity_id' => $user->uid,
+		'revision_id' => $user->uid,
+		'language' => 'und',
+		'delta' => '0',
+		'field_last_name_value' => $lastName,
+		'field_last_name_format' => null,
+		))
+		->execute();
+		
+		db_insert('field_revision_field_last_name')
+		->fields (array(
+		'entity_type' => 'user',
+		'bundle' => 'user',
+		'entity_id' => $user->uid,
+		'revision_id' => $user->uid,
+		'language' => 'und',
+		'delta' => '0',
+		'field_last_name_value' => $lastName,
+		'field_last_name_format' => null,
+		))
+		->execute();
+	}
+	//studentID
+	$result = db_query('select count(entity_id) as count from {field_data_field_studentid} f where f.entity_id = :uid',
+			array(':uid' => $user->uid));
+	foreach ($result as $record) {
+		$insert = $record->count;
+	}
+	if ($insert == 0) {
+		db_insert('field_data_field_studentid')
+		->fields (array(
+		'entity_type' => 'user',
+		'bundle' => 'user',
+		'entity_id' => $user->uid,
+		'revision_id' => $user->uid,
+		'language' => 'und',
+		'delta' => '0',
+		'field_studentid_value' => $studentID,
+		'field_studentid_format' => null,
+		))
+		->execute();
+		
+		db_insert('field_revision_field_studentid')
+		->fields (array(
+		'entity_type' => 'user',
+		'bundle' => 'user',
+		'entity_id' => $user->uid,
+		'revision_id' => $user->uid,
+		'language' => 'und',
+		'delta' => '0',
+		'field_studentid_value' => $studentID,
+		'field_studentid_format' => null,
+		))
+		->execute();
 	}
 }

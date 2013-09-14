@@ -2,4 +2,4 @@ name = Current Students
 description = Retrieves current student data from a non-Drupal database table (cs_currentstudents) and makes the data available to all Writing Center modules.
 package = Writing Center
 core = 7.x
-version = 7.x-1.0
+version = 7.x-1.x-dev
